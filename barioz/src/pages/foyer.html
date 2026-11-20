@@ -1,0 +1,31 @@
+<!--meta:{"title":"Foyer, forfaits et location d'équipement","desc":"Accueil au foyer de fond du Barioz : redevance d'accès aux pistes, location de skis et raquettes, boissons chaudes et petite restauration. Tarifs.","path":"/foyer","nav":"foyer"}-->
+<main id="main">
+  <section class="page-head">
+    <div class="wrap">
+      <p class="kicker">Accueil au foyer</p>
+      <h1>Forfaits, location &amp; foyer</h1>
+      <p class="lead"><span data-bind="hours">Tous les jours de 9h à 17h</span>. Renseignements au <a style="color:#fff" href="tel:" data-bind-tel><span data-bind="phone">04 76 71 06 47</span></a>.</p>
+    </div>
+  </section>
+  <section class="section" style="padding-top:36px">
+    <div class="wrap">
+      <p class="notice" data-message hidden></p>
+      <div class="split" style="margin-bottom:44px;align-items:start">
+        <div class="prose">
+          <h2 style="margin-top:0">Sur place</h2>
+          <ul>
+            <li>Vente de forfaits et location d’équipements.</li>
+            <li>Boissons chaudes et fraîches, petite restauration.</li>
+            <li>Cours particuliers : renseignements au foyer.</li>
+            <li data-bind="paymentNote">Règlement par CB, chèque ou espèces.</li>
+          </ul>
+          <p class="muted">Courrier : <span data-bind="address">Espace Nordique du Barioz, Mairie, 38830 Crêts en Belledonne</span></p>
+        </div>
+        <div class="frame">{{media:foyer|Le foyer de fond}}</div>
+      </div>
+      <div class="callout"><p><strong>Où acheter ?</strong> Les forfaits annuels nationaux et Isère-Drôme se prennent uniquement en ligne sur <a data-bind-href="nationalPassUrl" href="https://www.nordic-isere.fr/pass-national/" rel="noopener">nordic-isere.fr</a>. La prévente des cartes annuelles Barioz et des cartes site se fait sur <a data-bind-href="forfaitsUrl" href="https://skipass.les7laux.com/fr/cart" rel="noopener">skipass.les7laux.com</a>. Support magnétique obligatoire.</p></div>
+      <div data-tarifs="forfaits,raquettes,location"></div>
+      <p class="notice alert" data-fallback hidden>Les tarifs ne peuvent pas être affichés pour le moment. Appelez le foyer au 04 76 71 06 47.</p>
+    </div>
+  </section>
+</main>
