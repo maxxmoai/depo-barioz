@@ -148,6 +148,97 @@ r = await call('GET', '/api/audit', { cookie: foyer });
 assert.equal(r.status, 403);
 ok('journal des modifications : admin seulement');
 
+// ---- météo de secours (Open-Meteo simulé) ----
+{
+  const store = await import('../lib/store.js');
+  const realFetch = globalThis.fetch;
+  const pad = (v) => String(v).padStart(2, '0');
+  const parisHour = () => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
+  };
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    if (!String(url).includes('open-meteo')) return realFetch(url);
+    calls++;
+    return { ok: true, json: async () => ({ hourly: { time: [parisHour()], snow_depth: [0.42], temperature_2m: [-3.46], relative_humidity_2m: [81.2] } }) };
+  };
+  await store.set('weather', null);
+  // état « équipe n'a rien saisi » : valeurs vides
+  r = await call('PUT', '/api/conditions', { cookie: admin, body: { snowFoyer: '', snowRefuge: '', airTemp: '', humidity: '' } });
+  assert.equal(r.status, 200);
+  r = await call('GET', '/api/public');
+  assert.equal(r.json.conditions.snowFoyer, 42);
+  assert.equal(r.json.conditions.snowRefuge, 42);
+  assert.equal(r.json.conditions.airTemp, -3.5);
+  assert.equal(r.json.conditions.humidity, 81);
+  assert.equal(r.json.conditions.sources.snowFoyer, 'meteo');
+  assert.ok(!('at' in r.json.conditions));
+  ok('neige/température oubliées : complétées par l’estimation météo, marquées « meteo »');
+  // saisie récente : prioritaire
+  r = await call('PUT', '/api/conditions', { cookie: admin, body: { snowFoyer: 90 } });
+  r = await call('GET', '/api/public');
+  assert.equal(r.json.conditions.snowFoyer, 90);
+  assert.equal(r.json.conditions.sources.snowFoyer, 'manual');
+  assert.equal(r.json.conditions.sources.snowRefuge, 'meteo');
+  assert.equal(r.json.conditions.estimates.snowFoyer, 42);
+  ok('saisie manuelle récente prioritaire, autres champs en estimation');
+  // saisie périmée (> 30 h) : l’estimation reprend
+  const c = await store.get('conditions');
+  c.at.snowFoyer = new Date(Date.now() - 31 * 3600e3).toISOString();
+  await store.set('conditions', c);
+  r = await call('GET', '/api/public');
+  assert.equal(r.json.conditions.snowFoyer, 42);
+  assert.equal(r.json.conditions.sources.snowFoyer, 'meteo');
+  ok('saisie de plus de 30 h : l’estimation météo reprend');
+  assert.equal(calls, 1);
+  ok('estimation mise en cache (un seul appel météo)');
+  // panne de la météo : pas d’erreur, valeurs vides
+  globalThis.fetch = async (url) => { if (String(url).includes('open-meteo')) throw new Error('réseau'); return realFetch(url); };
+  await store.set('weather', null);
+  r = await call('GET', '/api/public');
+  assert.equal(r.status, 200);
+  assert.equal(r.json.conditions.sources.snowRefuge, null);
+  ok('météo indisponible : le site fonctionne, valeurs « non renseigné »');
+  globalThis.fetch = realFetch;
+  // cache HTTP : l’admin peut forcer une lecture fraîche
+  r = await call('GET', '/api/public');
+  assert.match(r.headers['Cache-Control'], /s-maxage=10/);
+  r = await handle({ method: 'GET', path: '/api/public', query: { fresh: '1' }, ip: '1', headers: {} });
+  assert.equal(r.headers['Cache-Control'], 'no-store');
+  ok('/public?fresh=1 : jamais mis en cache (boutons réactifs)');
+}
+
+// ---- compte visiteur (lecture seule) ----
+{
+  const visiteur = await login('visiteur');
+  r = await call('GET', '/api/me', { cookie: visiteur });
+  assert.equal(r.json.readOnly, true);
+  assert.ok(r.json.perms.includes('users.manage'));
+  assert.match(r.json.user.email, /•/);
+  for (const p of ['/api/users', '/api/perms', '/api/tokens', '/api/audit', '/api/settings', '/api/events']) {
+    r = await call('GET', p, { cookie: visiteur });
+    assert.equal(r.status, 200, `visiteur GET ${p}`);
+  }
+  r = await call('GET', '/api/users', { cookie: visiteur });
+  assert.ok(r.json.users.every((u) => u.email.includes('•')));
+  ok('visiteur : voit tous les écrans (e-mails masqués)');
+  const writes = [
+    ['PUT', '/api/conditions', { snowFoyer: 1 }], ['PATCH', '/api/trails/s1', { status: 'open' }], ['POST', '/api/trails/groomed', { all: true }],
+    ['PUT', '/api/tarifs', { tables: [] }], ['PUT', '/api/settings', { phone: '0' }], ['PUT', '/api/perms', { matrix: {} }],
+    ['POST', '/api/users', { name: 'x', email: 'x@y.fr', role: 'admin', password: '1234567890' }], ['POST', '/api/tokens', { name: 'x', perms: ['trails.groomed'] }],
+    ['POST', '/api/events', { title: 'x', date: '2099-01-01', kind: 'sport' }],
+  ];
+  for (const [m, p, body] of writes) {
+    r = await call(m, p, { cookie: visiteur, body });
+    assert.equal(r.status, 403, `visiteur ${m} ${p}`);
+  }
+  ok('visiteur : toutes les écritures refusées (403)');
+  r = await call('GET', '/api/perms', { cookie: await login('admin') });
+  assert.ok(!('visiteur' in r.json.matrix));
+  ok('visiteur absent de la table des autorisations');
+}
+
 // setup
 r = await call('POST', '/api/setup', { body: { setupToken: 'test-setup', email: 'a@b.fr', name: 'x', password: '1234567890' } });
 assert.equal(r.status, 409);

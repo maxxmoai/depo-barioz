@@ -5,9 +5,11 @@ export default async function handler(req, res) {
   const fromQuery = req.query?.path;
   const path = Array.isArray(fromQuery) ? fromQuery.join('/') : fromQuery ?? new URL(req.url, 'http://x').pathname;
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress;
+  const { path: _p, ...query } = req.query || {};
   const out = await handle({
     method: req.method,
     path,
+    query,
     headers: req.headers,
     body: req.body && typeof req.body === 'object' ? req.body : undefined,
     ip,

@@ -13,6 +13,11 @@
       <p class="notice" data-message hidden></p>
       <p class="notice alert" data-fallback hidden>Les conditions ne peuvent pas être affichées pour le moment. Appelez le foyer : <a href="tel:0476710647">04 76 71 06 47</a>.</p>
 
+      <div class="panel panel--cam">
+        <h2>Webcam du Crêt du Poulet</h2>
+        <div data-webcam></div>
+      </div>
+
       <div class="cond-layout">
         <div>
           <div class="panel">
@@ -38,9 +43,8 @@
           </div>
 
           <div class="panel">
-            <h2>Webcam &amp; météo</h2>
-            <div class="webcam" data-webcam></div>
-            <ul class="plain" style="margin-top:14px">
+            <h2>Météo</h2>
+            <ul class="plain">
               <li><a data-bind-href="meteoUrl" href="https://www.meteoblue.com/fr/meteo/semaine/les-sept-laux-le-pleynet_france_8426489" rel="noopener">Prévisions météo, Les Sept Laux</a></li>
               <li><a data-bind-href="meteoLocalUrl" href="http://mto38.free.fr/" rel="noopener">Météo en Isère</a></li>
             </ul>

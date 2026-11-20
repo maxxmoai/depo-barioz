@@ -66,3 +66,11 @@ table.adm-t { width: 100%; border-collapse: collapse; font-size: .92rem; min-wid
 .secret { background: #11221f; color: #e8f4ef; padding: 14px; border-radius: 10px; font: .85rem/1.5 ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
 .callout.warn { border-left-color: var(--warn); }
 .mini { font-size: .85rem; color: var(--muted); }
+
+/* réactivité : retour visuel immédiat pendant l'envoi */
+.switch { transition: background .12s, border-color .12s; touch-action: manipulation; }
+.switch.pending { opacity: .75; cursor: progress; }
+.notice.demo { background: #e8eef9; border: 1px solid #b7c6e6; color: #1f3a6b; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-weight: 600; }
+.auto-hint { margin: -4px 0 0; }
+.f .mini { margin-top: 4px; color: var(--muted); }
+.callout { padding: 12px 14px; background: var(--paper, #f4f7f7); border-left: 4px solid var(--line); border-radius: 8px; margin-top: 10px; }

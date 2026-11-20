@@ -11,7 +11,7 @@ npm run demo         # (autre terminal) données d'hiver fictives
 npm test             # tests API (19 groupes)
 SHOTS=./shots node tests/e2e.mjs   # tests navigateur (nécessite Playwright)
 ```
-Comptes démo (local uniquement) : `admin@`, `foyer@`, `dameur@`, `benevole@barioz.local` — mot de passe `barioz-demo-2026`.
+Comptes démo (local uniquement) : `admin@`, `foyer@`, `dameur@`, `benevole@`, `visiteur@barioz.local` — mot de passe `barioz-demo-2026`.
 
 ## Structure
 - `src/pages/*.html` : pages ; `src/partials/` : en-tête, pied de page ; `src/assets/` : CSS/JS/images
@@ -63,3 +63,13 @@ Sécurité : mots de passe hachés (scrypt), session HttpOnly, droits revérifi�
 ## Points à vérifier avant ouverture publique
 - Tarifs et dates repris de l'ancien site (relevé le 20/11/2026) : les relire dans `/admin` → Tarifs. Les cellules « 62 / 80 » du tableau forfaits (prévente / tarif normal) sont une interprétation de l'ancien tableau.
 - PDF des plans de pistes : liens encore vers l'ancien site ; à copier dans le projet avant de couper l'ancien site.
+
+
+## Nouveautés v2
+
+- **Boutons ouvrir/fermer/damée instantanés** : l'écran change tout de suite, l'envoi part en arrière-plan (file d'attente, un seul changement à la fois par piste, retour arrière + message en cas d'échec). L'admin lit `/api/public?fresh=1` (jamais mis en cache) ; le public garde un cache CDN de 10 s.
+- **Météo de secours** (Open-Meteo, gratuit, sans clé) : un champ neige/température/humidité laissé vide, ou saisi il y a plus de 30 h, est complété par une estimation de modèle, affichée « estimation météo ». Coordonnées modifiables dans Infos du site ; `WEATHER_DISABLED=1` désactive. Estimation grossière : la saisie du dameur reste la référence.
+- **Webcam intégrée** (accueil + conditions) : rafraîchie chaque minute, clic = agrandir, lien conservé (`webcamPageUrl`), message clair si indisponible.
+- **Plan des pistes** intégré sur /pistes (clic = agrandir), boutons PDF conservés. L'image pointe encore vers l'ancien hébergement : avant de couper l'ancien site, déposez `plan-pistes.jpg`/PDF dans ce dépôt et changez les URL dans Infos du site.
+- **Carte OpenStreetMap** intégrée sur /acces (repère au col du Barioz, coordonnées modifiables).
+- **Compte « Visiteur (démo)»** : voit tous les écrans comme un admin, e-mails masqués, aucune écriture possible (refus serveur 403). Créez-le dans Équipe & droits > Comptes avec le rôle « Visiteur (démo) ».

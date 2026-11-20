@@ -50,6 +50,13 @@ let me = null;
 let pub = null;
 let tab = 'today';
 const can = (p) => me?.perms?.includes(p);
+const readOnly = () => !!me?.readOnly;
+
+// File d'attente : les écritures partent une par une, dans l'ordre (pas de mises à jour perdues).
+let queue = Promise.resolve();
+const enqueue = (fn) => { const run = queue.then(fn); queue = run.catch(() => {}); return run; };
+const loadPub = async () => (await fetch(`/api/public?fresh=1&t=${Date.now()}`, { cache: 'no-store' })).json();
+const SRC_LABEL = { meteo: 'estimation météo', old: 'ancienne saisie' };
 
 // ---------------- connexion ----------------
 function loginView() {
@@ -80,32 +87,66 @@ function todayView() {
   const stateOf = (k) => (can(k) ? {} : { disabled: true });
   const lock = (k) => (can(k) ? '' : 'locked');
 
+  const repaints = [];
+  const syncTop = () => repaints.forEach((fn) => fn());
   if (can('trails.groomed')) {
-    const openSki = pub.trails.filter((t) => t.kind === 'ski' && t.status === 'open').length;
-    wrap.append(h('div', { class: 'card' },
-      h('h2', { text: 'Damage' }),
-      h('p', { class: 'hint', text: c.lastGroomedAt ? `Dernier damage enregistré : ${dt(c.lastGroomedAt)}` : 'Aucun damage enregistré.' }),
-      h('button', { class: 'btn btn--ember big', type: 'button', disabled: openSki === 0, text: openSki ? `J’ai damé les ${openSki} pistes ouvertes` : 'Ouvrez d’abord des pistes (ci-dessous)',
-        onclick: guard(async () => { await api('POST', '/trails/groomed', { all: true }); await refresh(); toast('Damage enregistré'); }) }),
+    const lastP = h('p', { class: 'hint' });
+    const allBtn = h('button', { class: 'btn btn--ember big', type: 'button',
+      onclick: guard(async () => {
+        const ids = pub.trails.filter((t) => t.kind === 'ski' && t.status === 'open').map((t) => t.id);
+        if (!ids.length) return;
+        allBtn.disabled = true;
+        try {
+          await enqueue(() => api('POST', '/trails/groomed', { all: true }));
+          const now = new Date().toISOString();
+          pub.trails.forEach((t) => { if (ids.includes(t.id)) t.groomedAt = now; });
+          c.lastGroomedAt = now;
+          syncTop(); toast('Damage enregistré');
+        } finally { syncTop(); }
+      }) });
+    repaints.push(() => {
+      const openSki = pub.trails.filter((t) => t.kind === 'ski' && t.status === 'open').length;
+      lastP.textContent = c.lastGroomedAt ? `Dernier damage enregistré : ${dt(c.lastGroomedAt)}` : 'Aucun damage enregistré.';
+      allBtn.disabled = openSki === 0;
+      allBtn.textContent = openSki ? `J’ai damé les ${openSki} pistes ouvertes` : 'Ouvrez d’abord des pistes (ci-dessous)';
+    });
+    wrap.append(h('div', { class: 'card' }, h('h2', { text: 'Damage' }), lastP, allBtn,
       h('p', { class: 'hint', text: 'Pour une seule piste, utilisez le bouton « Damée » dans la liste plus bas.' })));
+    syncTop();
   }
+
+  // champ de mesure : valeur manuelle récente préremplie, sinon vide + estimation météo en indication
+  const mField = (key, label, attrs, perm) => {
+    const src = c.sources?.[key];
+    const est = c.estimates?.[key];
+    const input = h('input', { name: key, type: 'number', inputmode: 'decimal', ...attrs,
+      value: src === 'manual' ? c[key] : (src === 'old' ? c[key] : ''), placeholder: est != null ? `estimation météo : ${est}` : '',
+      oninput: (e) => { e.target.dataset.touched = '1'; }, ...stateOf(perm) });
+    const note = src === 'manual' ? null : src === 'meteo' ? `Affiché sur le site : ${c[key]} (estimation météo)` : src === 'old' ? 'Ancienne saisie (plus de 30 h)' : null;
+    return h('label', { class: 'f' }, label, input, note ? h('span', { class: 'mini', text: note }) : null);
+  };
 
   // conditions
   const snowStates = Object.entries(pub.snowStates);
   const f = h('form', { class: 'card stack', onsubmit: guard(async (e) => {
     e.preventDefault();
     const body = {};
+    // Seuls les champs touchés sont envoyés : une valeur ancienne non modifiée ne reçoit pas une date « fraîche ».
+    const dirty = (el) => el.dataset.touched === '1';
     if (can('conditions.season')) body.season = f.season.value;
-    if (can('conditions.snowFoyer')) body.snowFoyer = f.snowFoyer.value;
-    if (can('conditions.snowRefuge')) body.snowRefuge = f.snowRefuge.value;
+    if (can('conditions.snowFoyer') && dirty(f.snowFoyer)) body.snowFoyer = f.snowFoyer.value;
+    if (can('conditions.snowRefuge') && dirty(f.snowRefuge)) body.snowRefuge = f.snowRefuge.value;
     if (can('conditions.measures')) {
-      body.airTemp = f.airTemp.value; body.snowTemp = f.snowTemp.value; body.humidity = f.humidity.value;
+      if (dirty(f.airTemp)) body.airTemp = f.airTemp.value;
+      body.snowTemp = f.snowTemp.value;
+      if (dirty(f.humidity)) body.humidity = f.humidity.value;
       body.snowStates = [...f.querySelectorAll('input[name=ss]:checked')].map((x) => x.value);
     }
     if (can('conditions.avalanche')) body.avalancheRisk = f.avalancheRisk.value;
     if (can('conditions.message')) { body.message = f.message.value; body.messageLevel = f.messageLevel.value; }
-    await api('PUT', '/conditions', body);
-    await refresh();
+    await enqueue(() => api('PUT', '/conditions', body));
+    pub = await loadPub();
+    await render();
     toast('Conditions enregistrées');
   }) },
   h('h2', { text: 'Conditions du matin' }),
@@ -113,12 +154,13 @@ function todayView() {
     h('label', { class: 'f' }, 'Saison', h('select', { name: 'season', ...stateOf('conditions.season') },
       ...[['closed', 'Non ouverte'], ['partial', 'Ouverture partielle'], ['open', 'Ouverte']].map(([v, l]) => h('option', { value: v, text: l, selected: c.season === v }))))),
   h('div', { class: 'grid2' },
-    h('div', { class: lock('conditions.snowFoyer') }, h('label', { class: 'f' }, 'Neige au foyer (cm)', h('input', { name: 'snowFoyer', type: 'number', inputmode: 'decimal', min: 0, value: c.snowFoyer ?? '', ...stateOf('conditions.snowFoyer') }))),
-    h('div', { class: lock('conditions.snowRefuge') }, h('label', { class: 'f' }, 'Neige au refuge (cm)', h('input', { name: 'snowRefuge', type: 'number', inputmode: 'decimal', min: 0, value: c.snowRefuge ?? '', ...stateOf('conditions.snowRefuge') })))),
+    h('div', { class: lock('conditions.snowFoyer') }, mField('snowFoyer', 'Neige au foyer (cm)', { min: 0 }, 'conditions.snowFoyer')),
+    h('div', { class: lock('conditions.snowRefuge') }, mField('snowRefuge', 'Neige au refuge (cm)', { min: 0 }, 'conditions.snowRefuge'))),
+  h('p', { class: 'hint auto-hint', text: 'Champ vide = le site affiche automatiquement une estimation météo. Une valeur saisie reste affichée 30 h, puis l’estimation reprend si elle n’est pas mise à jour.' }),
   h('div', { class: `grid2 ${lock('conditions.measures')}` },
-    h('label', { class: 'f' }, 'Température de l’air (°C)', h('input', { name: 'airTemp', type: 'number', inputmode: 'decimal', step: '0.5', value: c.airTemp ?? '', ...stateOf('conditions.measures') })),
+    mField('airTemp', 'Température de l’air (°C)', { step: '0.5' }, 'conditions.measures'),
     h('label', { class: 'f' }, 'Température de la neige (°C)', h('input', { name: 'snowTemp', type: 'number', inputmode: 'decimal', step: '0.5', value: c.snowTemp ?? '', ...stateOf('conditions.measures') })),
-    h('label', { class: 'f' }, 'Humidité (%)', h('input', { name: 'humidity', type: 'number', inputmode: 'decimal', min: 0, max: 100, value: c.humidity ?? '', ...stateOf('conditions.measures') }))),
+    mField('humidity', 'Humidité (%)', { min: 0, max: 100 }, 'conditions.measures')),
   h('div', { class: lock('conditions.measures') }, h('p', { class: 'mini', style: 'margin:0 0 8px;font-weight:600', text: 'État de la neige' }),
     h('div', { class: 'chips-sel' }, ...snowStates.map(([k, l]) => h('label', {}, h('input', { type: 'checkbox', name: 'ss', value: k, checked: c.snowStates?.includes(k), ...stateOf('conditions.measures') }), l)))),
   h('div', { class: `grid2 ${lock('conditions.avalanche')}` },
@@ -131,20 +173,45 @@ function todayView() {
   h('button', { class: 'btn big', type: 'submit', text: 'Enregistrer les conditions' }));
   wrap.append(f);
 
-  // pistes
-  const rows = (kind) => pub.trails.filter((t) => t.kind === kind).map((t) => {
-    const open = t.status === 'open';
+  // pistes : l'écran change immédiatement, l'envoi se fait en arrière-plan (retour arrière + message si échec)
+  const trailRow = (t) => {
+    const sub = h('span', { class: 'sub' });
+    const sw = h('button', { type: 'button', disabled: !can('trails.status') });
+    const gr = t.kind === 'ski' && can('trails.groomed') ? h('button', { type: 'button', class: 'btn sm', text: 'Damée' }) : null;
+    let busy = false;
+    const paint = () => {
+      const open = t.status === 'open';
+      sw.className = `switch ${open ? 'on' : 'off'}${busy ? ' pending' : ''}`;
+      sw.textContent = open ? 'Ouverte' : 'Fermée';
+      sw.setAttribute('aria-label', `${t.name} : ${open ? 'ouverte' : 'fermée'}, cliquer pour changer`);
+      sub.textContent = t.kind === 'ski' && t.groomedAt ? `damée ${dt(t.groomedAt)}` : '';
+      if (gr) gr.disabled = !open || busy;
+    };
+    sw.onclick = () => {
+      if (busy) return; // un seul changement à la fois par piste : pas d'aller-retour involontaire
+      const prev = t.status; const next = prev === 'open' ? 'closed' : 'open';
+      t.status = next; busy = true; paint(); syncTop();
+      enqueue(() => api('PATCH', `/trails/${t.id}`, { status: next }))
+        .catch(guard(async (e) => { t.status = prev; throw e; }))
+        .finally(() => { busy = false; paint(); syncTop(); });
+    };
+    if (gr) gr.onclick = () => {
+      if (busy) return;
+      const prev = t.groomedAt; t.groomedAt = new Date().toISOString(); busy = true; paint();
+      enqueue(() => api('POST', '/trails/groomed', { ids: [t.id] }))
+        .then(() => toast(`${t.name} : damage enregistré`))
+        .catch(guard(async (e) => { t.groomedAt = prev; throw e; }))
+        .finally(() => { busy = false; paint(); });
+    };
+    paint();
+    repaints.push(paint);
     return h('div', { class: 'trail-row' },
-      h('div', { class: 'name' }, `${t.num}. ${t.name}`, t.kind === 'ski' && t.groomedAt ? h('span', { class: 'sub', text: `damée ${dt(t.groomedAt)}` }) : null),
-      h('div', { class: 'acts' },
-        h('button', { type: 'button', class: `switch ${open ? 'on' : 'off'}`, disabled: !can('trails.status'), text: open ? 'Ouverte' : 'Fermée',
-          'aria-label': `${t.name} : ${open ? 'ouverte' : 'fermée'}, cliquer pour changer`,
-          onclick: guard(async () => { await api('PATCH', `/trails/${t.id}`, { status: open ? 'closed' : 'open' }); await refresh(); }) }),
-        t.kind === 'ski' && can('trails.groomed') ? h('button', { type: 'button', class: 'btn sm', disabled: !open, text: 'Damée',
-          onclick: guard(async () => { await api('POST', '/trails/groomed', { ids: [t.id] }); await refresh(); toast(`${t.name} : damage enregistré`); }) }) : null),
+      h('div', { class: 'name' }, `${t.num}. ${t.name}`, sub),
+      h('div', { class: 'acts' }, sw, gr),
       can('trails.status') ? h('input', { class: 'note', type: 'text', maxlength: 160, placeholder: 'Remarque (ex. passage délicat, verglas…)', value: t.note || '',
-        onchange: guard(async (e) => { await api('PATCH', `/trails/${t.id}`, { note: e.target.value }); toast('Remarque enregistrée'); }) }) : null);
-  });
+        onchange: guard(async (e) => { await enqueue(() => api('PATCH', `/trails/${t.id}`, { note: e.target.value })); t.note = e.target.value; toast('Remarque enregistrée'); }) }) : null);
+  };
+  const rows = (kind) => pub.trails.filter((t) => t.kind === kind).map(trailRow);
   wrap.append(h('div', { class: 'card' }, h('h2', { text: 'Pistes de ski' }), ...rows('ski')),
     h('div', { class: 'card' }, h('h2', { text: 'Itinéraires raquette' }), ...rows('raquette')));
   return wrap;
@@ -222,6 +289,8 @@ async function settingsView() {
     ['paymentNote', 'Moyens de paiement'], ['reservationUrl', 'Lien de réservation du refuge'], ['webcamUrl', 'Image de la webcam'],
     ['forfaitsUrl', 'Lien prévente forfaits'], ['nationalPassUrl', 'Lien pass national'], ['meteoUrl', 'Lien météo'], ['meteoLocalUrl', 'Lien météo locale'],
     ['sevenLauxUrl', 'Lien CO 7 Laux'], ['planPistesPdf', 'PDF plan des pistes'], ['planRaquettePdf', 'PDF parcours raquette'], ['youtubeId', 'Identifiant vidéo YouTube (soirées)'],
+    ['webcamPageUrl', 'Page de la webcam (lien « plein écran »)'], ['planPistesImage', 'Image du plan des pistes (aperçu sur /pistes)'],
+    ['lat', 'Latitude (carte + météo de secours)'], ['lng', 'Longitude (carte + météo de secours)'],
   ];
   const f = h('form', { class: 'card stack', onsubmit: guard(async (e) => {
     e.preventDefault();
@@ -266,7 +335,7 @@ async function teamView() {
 
   // matrice
   const matrix = structuredClone(perms.matrix);
-  const roleKeys = Object.keys(roles);
+  const roleKeys = Object.keys(roles).filter((r) => !roles[r].readOnly);
   const groups = [...new Set(Object.values(perms.permissions).map((p) => p.group))];
   const body = [];
   for (const g of groups) {
@@ -291,14 +360,22 @@ async function teamView() {
       const out = await api('POST', '/tokens', { name: tf.name.value, perms: [...tf.querySelectorAll('input[name=p]:checked')].map((x) => x.value) });
       result.replaceChildren(h('div', { class: 'callout warn' }, h('p', { text: 'Copiez ce jeton maintenant : il ne sera plus jamais affiché.' }),
         h('div', { class: 'secret', text: out.token }),
-        h('p', { class: 'mini', style: 'margin-top:10px', text: `Exemple (damage depuis un script ou un raccourci téléphone) : curl -X POST ${location.origin}/api/ingest/grooming -H "Authorization: Bearer <jeton>" -H "Content-Type: application/json" -d '{"all":true}'` })));
+        h('p', { class: 'mini', style: 'margin-top:10px', text: `Adresse à appeler : ${location.origin}/api/ingest/grooming (méthode POST, en-tête Authorization: Bearer <jeton>, en-tête Content-Type: application/json, contenu {"all":true} pour « toutes les pistes ouvertes » ou {"ids":["s1","s2"]}). Mesures : /api/ingest/conditions. Sur iPhone : app Raccourcis > « Obtenir le contenu de l’URL » ; sur Android : app HTTP Shortcuts ; sur NAS : un simple curl.` })));
       tf.reset();
     }) },
     h('label', { class: 'f' }, 'Nom de l’accès (ex. « Téléphone du dameur »)', h('input', { name: 'name', type: 'text', required: true })),
     h('div', { class: 'chips-sel' }, ...tk.allowed.map((a) => h('label', {}, h('input', { type: 'checkbox', name: 'p', value: a.key, checked: a.key === 'trails.groomed' }), a.label))),
     h('button', { class: 'btn', type: 'submit', text: 'Créer un accès automatique' }));
     wrap.append(h('div', { class: 'card' }, h('h2', { text: 'Accès automatiques' }),
-      h('p', { class: 'hint', style: 'margin:0', text: 'Pour qu’un capteur, un script ou un raccourci du téléphone du dameur envoie le damage ou les mesures sans se connecter. Chaque jeton a des droits limités et peut être révoqué.' }),
+      h('div', { class: 'callout' },
+        h('p', { style: 'margin:0 0 6px;font-weight:600', text: 'À quoi ça sert ?' }),
+        h('p', { class: 'mini', style: 'margin:0 0 6px', text: 'Normalement, pour enregistrer un damage il faut se connecter et appuyer sur un bouton. Un « accès automatique » est une clé secrète qui permet à un appareil d’envoyer l’information tout seul, sans compte ni mot de passe : un raccourci sur le téléphone du dameur (un seul appui, ou déclenché à la fin de la tournée), un petit script sur un NAS ou un Raspberry, un capteur de neige.' }),
+        h('ol', { class: 'mini', style: 'margin:0 0 6px;padding-left:18px' },
+          h('li', { text: 'Vous créez l’accès ci-dessous et cochez ce qu’il a le droit de faire (par défaut : enregistrer un damage).' }),
+          h('li', { text: 'Le jeton (« bzd_… ») s’affiche une seule fois : copiez-le dans le raccourci ou le script.' }),
+          h('li', { text: 'L’appareil envoie une requête sécurisée à l’adresse du site avec ce jeton ; le site enregistre le damage ou les mesures et l’affiche tout de suite.' })),
+        h('p', { class: 'mini', style: 'margin:0', text: 'Un jeton ne donne jamais plus que ce que vous avez coché (jamais les tarifs, les comptes, etc.), chaque usage est daté dans la liste, et vous pouvez le révoquer à tout moment. Il ne remplace pas la saisie manuelle : c’est un confort en plus. Les hauteurs de neige oubliées, elles, sont déjà complétées par la météo sans aucun jeton.' })),
+
       tk.tokens.length ? h('div', { class: 'table-scroll', style: 'margin-top:12px' }, h('table', { class: 'adm-t' },
         h('thead', {}, h('tr', {}, h('th', { text: 'Nom' }), h('th', { text: 'Droits' }), h('th', { text: 'Dernier usage' }), h('th'))),
         h('tbody', {}, ...tk.tokens.map((t) => h('tr', {}, h('td', { text: t.name }), h('td', { class: 'mini', text: t.perms.join(', ') }), h('td', { class: 'mini', text: t.revoked ? 'révoqué' : dt(t.lastUsedAt) }),
@@ -325,6 +402,12 @@ const TABS = [
   { id: 'audit', label: 'Journal', show: () => can('audit.read'), view: auditView },
 ];
 
+// Compte visiteur : tout est visible, rien n'est cliquable (le serveur refuse de toute façon toute écriture).
+function lockAll(root) {
+  root.querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = true; });
+  root.querySelectorAll('form').forEach((f) => f.addEventListener('submit', (e) => e.preventDefault(), true));
+}
+
 async function render() {
   const tabs = TABS.filter((t) => t.show());
   if (!tabs.find((t) => t.id === tab)) tab = tabs[0]?.id;
@@ -334,20 +417,22 @@ async function render() {
     h('div', { class: 'adm-top' },
       h('a', { class: 'brand', href: '/' }, h('span', { class: 'brand__text' }, h('strong', { text: 'Espace Nordique du Barioz' }), h('span', { text: 'Espace équipe' }))),
       h('div', { class: 'adm-top__who' }, h('b', { text: me.user?.name }), `${me.user?.roleLabel} · `, h('a', { href: '#', text: 'Se déconnecter', onclick: guard(async (e) => { e.preventDefault(); await api('POST', '/logout'); me = null; await boot(); }) }))),
+    readOnly() ? h('p', { class: 'notice demo', role: 'status', text: 'Mode démonstration : vous voyez l’espace équipe comme un administrateur, mais rien ne peut être modifié.' }) : null,
     tabs.length ? bar : h('p', { class: 'notice', text: 'Votre rôle n’a encore aucune autorisation. Demandez à un administrateur.' }), content);
   const t = tabs.find((x) => x.id === tab);
   if (t) { try { content.replaceChildren(await t.view()); } catch (e) { content.replaceChildren(h('p', { class: 'notice alert', text: e.message })); } }
+  if (readOnly()) lockAll(content);
 }
 
 async function refresh() {
-  pub = await (await fetch('/api/public', { cache: 'no-store' })).json();
+  pub = await loadPub();
   await render();
 }
 
 async function boot() {
   me = await api('GET', '/me');
   if (!me.user) { loginView(); return; }
-  pub = await (await fetch('/api/public', { cache: 'no-store' })).json();
+  pub = await loadPub();
   await render();
 }
 boot();

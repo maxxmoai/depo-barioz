@@ -61,6 +61,72 @@ try {
   $$('[data-fallback]').forEach((el) => { el.hidden = false; });
 }
 
+// ----- aperçu agrandi (image ou carte) -----
+function lightbox(src, alt) {
+  const dlg = h('dialog', { class: 'lightbox', 'aria-label': alt });
+  const close = h('button', { type: 'button', class: 'lightbox__x', 'aria-label': 'Fermer', text: '✕' });
+  close.addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.append(close, h('img', { src, alt }));
+  document.body.append(dlg);
+  if (typeof dlg.showModal === 'function') dlg.showModal(); else window.open(src, '_blank', 'noopener');
+}
+
+// ----- webcam intégrée : image rafraîchie chaque minute, clic = agrandir, lien conservé -----
+function mountWebcam(root, s) {
+  if (!s.webcamUrl) { root.hidden = true; return; }
+  const src = () => `${s.webcamUrl}${s.webcamUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  const img = h('img', { alt: 'Webcam du Crêt du Poulet en direct', decoding: 'async' });
+  const frame = h('button', { type: 'button', class: 'webcam__frame', 'aria-label': 'Agrandir la webcam' }, img);
+  const stamp = h('span', { class: 'webcam__stamp' });
+  const miss = h('div', { class: 'webcam__miss', hidden: true },
+    h('strong', { text: 'Webcam momentanément indisponible' }),
+    h('span', { text: 'L’image est fournie par un service extérieur. Réessayez dans quelques instants.' }));
+  const live = h('span', { class: 'webcam__live', text: 'En direct' });
+  const link = s.webcamPageUrl ? h('a', { class: 'btn btn--ghost sm', href: s.webcamPageUrl, rel: 'noopener', target: '_blank', text: 'Ouvrir la webcam ↗' }) : null;
+  const refreshBtn = h('button', { type: 'button', class: 'btn btn--ghost sm', text: 'Actualiser' });
+  const load = () => { img.src = src(); };
+  img.addEventListener('load', () => {
+    miss.hidden = true; frame.hidden = false;
+    stamp.textContent = `Image actualisée à ${fmtTime(new Date())}`;
+  });
+  img.addEventListener('error', () => { frame.hidden = true; miss.hidden = false; stamp.textContent = ''; });
+  frame.addEventListener('click', () => lightbox(img.currentSrc || img.src, img.alt));
+  refreshBtn.addEventListener('click', load);
+  root.classList.add('webcam');
+  root.replaceChildren(frame, miss, h('div', { class: 'webcam__bar' }, live, stamp, h('span', { class: 'webcam__acts' }, refreshBtn, link)));
+  load();
+  setInterval(() => { if (!document.hidden) load(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+}
+
+// ----- plan des pistes (image) : clic = agrandir ; PDF conservé en boutons -----
+function mountPlan(root, s) {
+  if (!s.planPistesImage) { root.hidden = true; return; }
+  const img = h('img', { src: s.planPistesImage, alt: 'Plan des pistes de ski de fond et des itinéraires raquette du Barioz', loading: 'lazy', decoding: 'async' });
+  const zoom = h('button', { type: 'button', class: 'plan__zoom', 'aria-label': 'Agrandir le plan des pistes' }, img);
+  zoom.addEventListener('click', () => lightbox(img.currentSrc || img.src, img.alt));
+  img.addEventListener('error', () => { root.replaceChildren(h('p', { class: 'muted', text: 'L’aperçu du plan est indisponible : utilisez le bouton de téléchargement (PDF) ci-dessus.' })); });
+  root.replaceChildren(zoom, h('p', { class: 'legend', text: 'Cliquez sur le plan pour l’agrandir.' }));
+}
+
+// ----- carte intégrée (OpenStreetMap) -----
+function mountMap(root, s) {
+  const lat = parseFloat(s.lat); const lng = parseFloat(s.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) { root.hidden = true; return; }
+  const dx = 0.02; const dy = 0.012;
+  const bbox = [lng - dx, lat - dy, lng + dx, lat + dy].map((v) => v.toFixed(5)).join('%2C');
+  const iframe = h('iframe', { title: 'Carte : localisation de l’Espace Nordique du Barioz', loading: 'lazy', referrerpolicy: 'no-referrer',
+    src: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lng.toFixed(6)}` });
+  root.replaceChildren(iframe, h('p', { class: 'legend' }, '© ', h('a', { href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`, rel: 'noopener', text: 'Contributeurs OpenStreetMap' }), ' · le repère indique le col du Barioz.'));
+}
+
+const stat = (v, unit, label, src) => h('div', { class: 'stat' },
+  h('div', { class: 'stat__v' }, n(v), v == null ? null : h('small', { text: unit })),
+  h('div', { class: 'stat__l', text: label }),
+  src === 'meteo' ? h('div', { class: 'stat__src', text: 'estimation météo' }) : src === 'old' ? h('div', { class: 'stat__src', text: 'ancienne mesure' }) : null);
+
 if (data) {
   const { conditions: c, trails, events, tarifs, settings: s, snowStates } = data;
 
@@ -69,6 +135,9 @@ if (data) {
   $$('[data-bind-tel]').forEach((el) => { el.href = `tel:${(s.phone || '').replace(/[^\d+]/g, '')}`; });
   $$('[data-bind-href]').forEach((el) => { if (s[el.dataset.bindHref]) el.href = s[el.dataset.bindHref]; });
   $$('[data-video]').forEach((el) => { if (s.youtubeId) el.dataset.video = s.youtubeId; });
+  $$('[data-webcam]').forEach((el) => mountWebcam(el, s));
+  $$('[data-plan]').forEach((el) => mountPlan(el, s));
+  $$('[data-map]').forEach((el) => mountMap(el, s));
 
   const ski = trails.filter((t) => t.kind === 'ski');
   const raq = trails.filter((t) => t.kind === 'raquette');
@@ -101,10 +170,9 @@ if (data) {
     $('[data-card-title]', card).textContent = seasonLabel;
     $('[data-card-dot]', card).className = `dot ${c.season}`;
     const grid = $('[data-card-grid]', card);
-    const stat = (v, unit, label) => h('div', { class: 'stat' }, h('div', { class: 'stat__v' }, n(v), v == null ? null : h('small', { text: unit })), h('div', { class: 'stat__l', text: label }));
     grid.replaceChildren(
-      stat(c.snowFoyer, 'cm', 'Neige au foyer (1450 m)'),
-      stat(c.snowRefuge, 'cm', 'Neige au refuge (1700 m)'),
+      stat(c.snowFoyer, 'cm', 'Neige au foyer (1450 m)', c.sources?.snowFoyer),
+      stat(c.snowRefuge, 'cm', 'Neige au refuge (1700 m)', c.sources?.snowRefuge),
       stat(c.season === 'closed' ? null : openSki, `/${ski.length}`, 'Pistes de ski ouvertes'),
       stat(c.season === 'closed' ? null : openRaq, `/${raq.length}`, 'Itinéraires raquette ouverts'),
     );
@@ -114,14 +182,17 @@ if (data) {
   // page conditions
   const full = $('[data-conditions]');
   if (full) {
-    const stat = (v, unit, label) => h('div', { class: 'stat' }, h('div', { class: 'stat__v' }, n(v), v == null ? null : h('small', { text: unit })), h('div', { class: 'stat__l', text: label }));
     $('[data-cond-stats]').replaceChildren(
-      stat(c.snowFoyer, 'cm', 'Hauteur de neige au foyer (1450 m)'),
-      stat(c.snowRefuge, 'cm', 'Hauteur de neige au refuge (1700 m)'),
-      stat(c.airTemp, '°C', 'Température de l’air ce matin'),
+      stat(c.snowFoyer, 'cm', 'Hauteur de neige au foyer (1450 m)', c.sources?.snowFoyer),
+      stat(c.snowRefuge, 'cm', 'Hauteur de neige au refuge (1700 m)', c.sources?.snowRefuge),
+      stat(c.airTemp, '°C', 'Température de l’air', c.sources?.airTemp),
       stat(c.snowTemp, '°C', 'Température de la neige'),
-      stat(c.humidity, '%', 'Humidité de l’air'),
+      stat(c.humidity, '%', 'Humidité de l’air', c.sources?.humidity),
     );
+    if (Object.values(c.sources || {}).includes('meteo')) {
+      const note = h('p', { class: 'legend', text: 'Les valeurs marquées « estimation météo » sont calculées automatiquement par un modèle météo (coordonnées du col) en attendant la mesure du dameur ; elles peuvent différer du terrain.' });
+      $('[data-cond-stats]').after(note);
+    }
     const risk = $('[data-risk]');
     if (risk) {
       risk.replaceChildren(
@@ -136,12 +207,6 @@ if (data) {
     $('[data-season]').textContent = seasonLabel;
     $('[data-season-dot]').className = `dot ${c.season}`;
 
-    const cam = $('[data-webcam]');
-    if (cam && s.webcamUrl) {
-      const img = h('img', { src: `${s.webcamUrl}?t=${Math.floor(Date.now() / 60000)}`, alt: 'Webcam du Crêt du Poulet', loading: 'lazy' });
-      img.addEventListener('error', () => { cam.hidden = true; });
-      cam.replaceChildren(img);
-    } else if (cam) cam.hidden = true;
   }
 
   // listes de pistes

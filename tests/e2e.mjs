@@ -11,6 +11,7 @@ let playwright;
 try { playwright = require('playwright'); } catch { playwright = require('/home/claude/.npm-global/lib/node_modules/playwright'); }
 
 process.env.DATA_FILE = path.join(mkdtempSync(path.join(os.tmpdir(), 'barioz-e2e-')), 'db.json');
+process.env.WEATHER_DISABLED = '1'; // pas d'appel réseau : valeurs déterministes
 delete process.env.VERCEL;
 const shots = process.env.SHOTS || path.join(os.tmpdir(), 'barioz-shots');
 mkdirSync(shots, { recursive: true });
@@ -37,6 +38,14 @@ await new Promise((r) => server.listen(0, r));
 const base = `http://localhost:${server.address().port}`;
 const browser = await playwright.chromium.launch();
 
+// Services extérieurs simulés : la webcam est coupée par défaut, la carte et le plan sont servis localement.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+async function stub(page, { cam = false } = {}) {
+  await page.route(/epok\.network/, (r) => (cam ? r.fulfill({ status: 200, contentType: 'image/png', body: PNG }) : r.abort()));
+  await page.route(/openstreetmap\.org/, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>carte</p>' }));
+  await page.route(/usercontent\.one/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+}
+
 const PAGES = ['/', '/conditions', '/pistes', '/foyer', '/refuge', '/soirees', '/evenements', '/scolaires', '/association', '/acces'];
 const problems = [];
 let checks = 0;
@@ -50,7 +59,7 @@ for (const [label, viewport] of [['desktop', { width: 1280, height: 900 }], ['mo
     page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error' && !/epok\.network|ERR_|Failed to load resource/.test(m.text() + (m.location()?.url || ''))) errs.push(`console: ${m.text()}`); });
     page.on('response', (r) => { if (r.status() >= 400 && r.url().startsWith(base)) errs.push(`HTTP ${r.status()} ${r.url()}`); });
-    await page.route(/epok\.network/, (r) => r.abort());
+    await stub(page);
     await page.goto(base + p, { waitUntil: 'networkidle' });
     await page.waitForSelector('[data-status-bar]:not([hidden])');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -69,7 +78,7 @@ ok(`${PAGES.length} pages × 2 formats : aucune erreur JS/HTTP, aucun débordeme
 // ---- contenu dynamique ----
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.route(/epok\.network/, (r) => r.abort());
+  await stub(page);
   await page.goto(`${base}/conditions`, { waitUntil: 'networkidle' });
   assert.equal(await page.locator('[data-trails-ski] .trail').count(), 13);
   assert.equal(await page.locator('[data-trails-raq] .trail').count(), 5);
@@ -97,7 +106,7 @@ ok(`${PAGES.length} pages × 2 formats : aucune erreur JS/HTTP, aucun débordeme
 // ---- espace équipe : dameur ----
 async function loginAs(who, viewport = { width: 390, height: 844 }) {
   const page = await browser.newPage({ viewport });
-  await page.route(/epok\.network/, (r) => r.abort());
+  await stub(page);
   await page.goto(`${base}/admin/`, { waitUntil: 'networkidle' });
   await page.fill('input[name=email]', `${who}@barioz.local`);
   await page.fill('input[name=password]', 'barioz-demo-2026');
@@ -157,6 +166,94 @@ async function loginAs(who, viewport = { width: 390, height: 844 }) {
   await page.click('button[type=submit]');
   await page.waitForSelector('.notice.alert:not([hidden])');
   ok('connexion : message d’erreur sur mauvais mot de passe');
+  await page.close();
+}
+
+// ---- webcam, plan et carte intégrés ----
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await stub(page, { cam: true });
+  await page.goto(`${base}/conditions`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.webcam__frame img');
+  assert.ok(await page.locator('.webcam__frame').isVisible());
+  assert.ok(await page.locator('.webcam__bar a[href*="epok.network"]').isVisible());
+  await page.screenshot({ path: path.join(shots, 'desktop-conditions-webcam.png'), fullPage: true });
+  assert.ok(!(await page.locator('.webcam__miss').isVisible()), 'pas de message d’erreur quand la webcam répond');
+  await page.click('.webcam__frame');
+  assert.ok(await page.locator('dialog.lightbox[open]').isVisible());
+  await page.keyboard.press('Escape');
+  ok('conditions : webcam intégrée (aperçu, lien conservé, agrandissement)');
+  await page.goto(base, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.webcam__frame img');
+  assert.ok(await page.locator('.webcam__live').isVisible());
+  ok('accueil : webcam « en direct » visible');
+  const cam2 = await browser.newPage();
+  await stub(cam2); // webcam coupée
+  await cam2.goto(`${base}/conditions`, { waitUntil: 'networkidle' });
+  assert.ok(await cam2.locator('.webcam__miss').isVisible());
+  assert.match(await cam2.locator('.webcam__miss').innerText(), /indisponible/);
+  await cam2.close();
+  ok('webcam coupée : message clair au lieu d’un bloc vide');
+  await page.goto(`${base}/pistes`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.plan__zoom img');
+  assert.ok(await page.locator('a:has-text("Plan des pistes à télécharger")').isVisible());
+  await page.click('.plan__zoom');
+  assert.ok(await page.locator('dialog.lightbox[open] img').isVisible());
+  await page.keyboard.press('Escape');
+  ok('pistes : image du plan intégrée + bouton PDF conservé');
+  await page.goto(`${base}/acces`, { waitUntil: 'networkidle' });
+  const src = await page.locator('.map iframe').getAttribute('src');
+  assert.match(src, /openstreetmap\.org\/export\/embed\.html\?bbox=.*marker=45\.33/);
+  await page.screenshot({ path: path.join(shots, 'desktop-acces-carte.png'), fullPage: true });
+  ok('accès : carte OpenStreetMap intégrée avec repère');
+  await page.close();
+}
+
+// ---- boutons réactifs (réseau lent simulé) ----
+{
+  const page = await loginAs('dameur');
+  await page.route('**/api/trails/**', async (route) => { await new Promise((r) => setTimeout(r, 2500)); await route.continue(); });
+  const row = page.locator('.trail-row', { hasText: 'Les Môilles' });
+  const sw = row.locator('.switch');
+  const before = (await sw.innerText()).trim();
+  const t0 = Date.now();
+  await sw.click();
+  const after = (await sw.innerText()).trim();
+  assert.notEqual(before, after);
+  assert.ok(Date.now() - t0 < 600, 'le bouton doit changer immédiatement');
+  await sw.click(); // second appui pendant l’envoi : ignoré, pas d’aller-retour
+  assert.equal((await sw.innerText()).trim(), after);
+  await page.waitForFunction(() => !document.querySelector('.switch.pending'), null, { timeout: 8000 });
+  assert.equal((await sw.innerText()).trim(), after);
+  const t = (await (await fetch(`${base}/api/public?fresh=1`)).json()).trails.find((x) => x.name === 'Les Môilles');
+  assert.equal(t.status === 'open' ? 'Ouverte' : 'Fermée', after);
+  ok('ouvrir/fermer : changement instantané, double appui ignoré, état serveur identique');
+  // « Damée » instantané
+  await page.unroute('**/api/trails/**');
+  const open = page.locator('.trail-row').filter({ has: page.locator('.switch.on') }).first();
+  await open.locator('button:has-text("Damée")').click();
+  assert.match(await open.locator('.sub').innerText(), /damée/);
+  ok('bouton « Damée » : mention immédiate');
+  await page.close();
+}
+
+// ---- visiteur (démo, lecture seule) ----
+{
+  const page = await loginAs('visiteur', { width: 1280, height: 900 });
+  const tabs = await page.locator('.tabs button').allInnerTexts();
+  assert.deepEqual(tabs, ['Aujourd’hui', 'Événements', 'Tarifs', 'Infos du site', 'Équipe & droits', 'Journal']);
+  assert.ok(await page.locator('.notice.demo').isVisible());
+  assert.ok(await page.locator('input[name=snowFoyer]').isDisabled());
+  assert.ok(await page.locator('.trail-row .switch').first().isDisabled());
+  await page.screenshot({ path: path.join(shots, 'desktop-admin-visiteur.png'), fullPage: true });
+  await page.click('button:has-text("Équipe & droits")');
+  await page.waitForSelector('text=Table des autorisations');
+  assert.equal(await page.locator('table.adm-t input[type=checkbox]:not(:disabled)').count(), 0);
+  assert.ok(await page.locator('text=À quoi ça sert').isVisible());
+  await page.screenshot({ path: path.join(shots, 'desktop-admin-visiteur-equipe.png'), fullPage: true });
+  await page.click('button:has-text("Journal")');
+  await page.waitForSelector('text=Dernières modifications');
+  ok('visiteur : voit les 6 onglets, tout est verrouillé, bandeau « démonstration »');
   await page.close();
 }
 
