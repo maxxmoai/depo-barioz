@@ -1,0 +1,56 @@
+<!--meta:{"title":"Neige & état des pistes","desc":"Hauteur de neige, dernier damage, pistes de ski et itinéraires raquette ouverts à l'Espace Nordique du Barioz.","path":"/conditions","nav":"conditions"}-->
+<main id="main">
+  <section class="page-head">
+    <div class="wrap">
+      <p class="kicker">En direct du foyer</p>
+      <h1>Neige &amp; état des pistes</h1>
+      <p class="lead" data-groomed>Chargement…</p>
+    </div>
+  </section>
+
+  <section class="section" data-conditions style="padding-top:36px">
+    <div class="wrap">
+      <p class="notice" data-message hidden></p>
+      <p class="notice alert" data-fallback hidden>Les conditions ne peuvent pas être affichées pour le moment. Appelez le foyer : <a href="tel:0476710647">04 76 71 06 47</a>.</p>
+
+      <div class="cond-layout">
+        <div>
+          <div class="panel">
+            <h2><span class="dot" data-season-dot></span> <span data-season>Conditions</span></h2>
+            <div class="stats4" data-cond-stats></div>
+            <div class="chips" data-snow-states></div>
+            <p style="margin:16px 0 0"><strong>Risque d’avalanche :</strong> <span data-risk></span></p>
+            <p class="legend" data-updated></p>
+          </div>
+
+          <div class="panel">
+            <h2>Pistes de ski</h2>
+            <ul class="trail-list" data-trails-ski></ul>
+            <p class="legend">Carte magnétique obligatoire pour les forfaits. Les pistes sont damées la nuit : l’accès aux pistes de ski est interdit entre 17h et 9h.</p>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <h2>Itinéraires raquette</h2>
+            <ul class="trail-list" data-trails-raq></ul>
+            <p class="legend">Participez à la pérennité du site : prenez votre ticket raquette à 2,50&nbsp;€. Ces itinéraires balisés se déroulent en « zone montagne » et sont sous votre propre responsabilité. Pensez à votre sécurité et adaptez votre matériel aux conditions (raquettes, crampons…).</p>
+          </div>
+
+          <div class="panel">
+            <h2>Webcam &amp; météo</h2>
+            <div class="webcam" data-webcam></div>
+            <ul class="plain" style="margin-top:14px">
+              <li><a data-bind-href="meteoUrl" href="https://www.meteoblue.com/fr/meteo/semaine/les-sept-laux-le-pleynet_france_8426489" rel="noopener">Prévisions météo, Les Sept Laux</a></li>
+              <li><a data-bind-href="meteoLocalUrl" href="http://mto38.free.fr/" rel="noopener">Météo en Isère</a></li>
+            </ul>
+          </div>
+
+          <div class="callout">
+            <p><strong>Gestion des pistes.</strong> Depuis le 1<sup>er</sup> décembre 2025, la gestion des pistes et la sécurité sont assurées par la Communauté de Communes Le Grésivaudan, via la SPLDG (Société Publique Locale du Grésivaudan).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>

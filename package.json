@@ -1,0 +1,14 @@
+{
+  "name": "espace-nordique-barioz",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Site de l'Espace Nordique du Barioz : site public + espace dameur / équipe",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && node server.mjs",
+    "demo": "node scripts/demo-data.mjs",
+    "test": "node tests/api.test.mjs"
+  }
+}
