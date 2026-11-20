@@ -161,7 +161,8 @@ ok('journal des modifications : admin seulement');
   globalThis.fetch = async (url) => {
     if (!String(url).includes('open-meteo')) return realFetch(url);
     calls++;
-    return { ok: true, json: async () => ({ hourly: { time: [parisHour()], snow_depth: [0.42], temperature_2m: [-3.46], relative_humidity_2m: [81.2] } }) };
+    const refuge = new URL(url).searchParams.get('elevation') === '1700'; // le refuge reçoit sa propre estimation
+    return { ok: true, json: async () => ({ hourly: { time: [parisHour()], snow_depth: [refuge ? 0.6 : 0.42], temperature_2m: [-3.46], relative_humidity_2m: [81.2] } }) };
   };
   await store.set('weather', null);
   // état « équipe n'a rien saisi » : valeurs vides
@@ -169,7 +170,7 @@ ok('journal des modifications : admin seulement');
   assert.equal(r.status, 200);
   r = await call('GET', '/api/public');
   assert.equal(r.json.conditions.snowFoyer, 42);
-  assert.equal(r.json.conditions.snowRefuge, 42);
+  assert.equal(r.json.conditions.snowRefuge, 60);
   assert.equal(r.json.conditions.airTemp, -3.5);
   assert.equal(r.json.conditions.humidity, 81);
   assert.equal(r.json.conditions.sources.snowFoyer, 'meteo');
@@ -191,8 +192,8 @@ ok('journal des modifications : admin seulement');
   assert.equal(r.json.conditions.snowFoyer, 42);
   assert.equal(r.json.conditions.sources.snowFoyer, 'meteo');
   ok('saisie de plus de 30 h : l’estimation météo reprend');
-  assert.equal(calls, 1);
-  ok('estimation mise en cache (un seul appel météo)');
+  assert.equal(calls, 2);
+  ok('estimation mise en cache (un appel par point, foyer + refuge, puis plus rien)');
   // panne de la météo : pas d’erreur, valeurs vides
   globalThis.fetch = async (url) => { if (String(url).includes('open-meteo')) throw new Error('réseau'); return realFetch(url); };
   await store.set('weather', null);

@@ -9,6 +9,7 @@ function h(tag, attrs = {}, ...kids) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
     else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? '' : v);
   }
   for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(kid));
@@ -77,7 +78,7 @@ function lightbox(src, alt) {
 function mountWebcam(root, s) {
   if (!s.webcamUrl) { root.hidden = true; return; }
   const src = () => `${s.webcamUrl}${s.webcamUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
-  const img = h('img', { alt: 'Webcam du Crêt du Poulet en direct', decoding: 'async' });
+  const img = h('img', { alt: 'Webcam du Crêt du Poulet en direct', decoding: 'async', width: '1280', height: '720' });
   const frame = h('button', { type: 'button', class: 'webcam__frame', 'aria-label': 'Agrandir la webcam' }, img);
   const stamp = h('span', { class: 'webcam__stamp' });
   const miss = h('div', { class: 'webcam__miss', hidden: true },
@@ -111,15 +112,26 @@ function mountPlan(root, s) {
   root.replaceChildren(zoom, h('p', { class: 'legend', text: 'Cliquez sur le plan pour l’agrandir.' }));
 }
 
-// ----- carte intégrée (OpenStreetMap) -----
+// ----- carte intégrée (OpenStreetMap) : un repère à la fois, on bascule entre foyer / refuge / Crêt du Poulet -----
 function mountMap(root, s) {
-  const lat = parseFloat(s.lat); const lng = parseFloat(s.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) { root.hidden = true; return; }
-  const dx = 0.02; const dy = 0.012;
-  const bbox = [lng - dx, lat - dy, lng + dx, lat + dy].map((v) => v.toFixed(5)).join('%2C');
-  const iframe = h('iframe', { title: 'Carte : localisation de l’Espace Nordique du Barioz', loading: 'lazy', referrerpolicy: 'no-referrer',
-    src: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lng.toFixed(6)}` });
-  root.replaceChildren(iframe, h('p', { class: 'legend' }, '© ', h('a', { href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`, rel: 'noopener', text: 'Contributeurs OpenStreetMap' }), ' · le repère indique le col du Barioz.'));
+  const pt = (label, lat, lng) => (Number.isFinite(parseFloat(lat)) && Number.isFinite(parseFloat(lng)) ? { label, lat: parseFloat(lat), lng: parseFloat(lng) } : null);
+  const points = [pt('Foyer', s.lat, s.lng), pt('Refuge', s.latRefuge, s.lngRefuge), pt('Crêt du Poulet', s.latCret, s.lngCret)].filter(Boolean);
+  if (!points.length) { root.hidden = true; return; }
+  const iframe = h('iframe', { title: 'Carte : localisation sur le domaine du Barioz', loading: 'lazy', referrerpolicy: 'no-referrer' });
+  const credit = h('p', { class: 'legend' });
+  const chips = h('div', { class: 'map__tabs', role: 'group', 'aria-label': 'Lieu affiché sur la carte' });
+  const show = (i) => {
+    const p = points[i];
+    const dx = 0.02; const dy = 0.012;
+    const bbox = [p.lng - dx, p.lat - dy, p.lng + dx, p.lat + dy].map((v) => v.toFixed(5)).join('%2C');
+    iframe.src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${p.lat.toFixed(6)}%2C${p.lng.toFixed(6)}`;
+    credit.replaceChildren('© ', h('a', { href: `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lng}#map=16/${p.lat}/${p.lng}`, rel: 'noopener', text: 'Contributeurs OpenStreetMap' }), ` · repère : ${p.label}. `,
+      h('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, rel: 'noopener', text: 'Itinéraire' }));
+    [...chips.children].forEach((c, j) => c.setAttribute('aria-pressed', String(j === i)));
+  };
+  points.forEach((p, i) => chips.append(h('button', { type: 'button', class: 'chip-btn', text: p.label, 'aria-pressed': 'false', onclick: () => show(i) })));
+  root.replaceChildren(...(points.length > 1 ? [chips] : []), iframe, credit);
+  show(0);
 }
 
 const stat = (v, unit, label, src) => h('div', { class: 'stat' },

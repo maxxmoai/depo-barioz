@@ -290,7 +290,9 @@ async function settingsView() {
     ['forfaitsUrl', 'Lien prévente forfaits'], ['nationalPassUrl', 'Lien pass national'], ['meteoUrl', 'Lien météo'], ['meteoLocalUrl', 'Lien météo locale'],
     ['sevenLauxUrl', 'Lien CO 7 Laux'], ['planPistesPdf', 'PDF plan des pistes'], ['planRaquettePdf', 'PDF parcours raquette'], ['youtubeId', 'Identifiant vidéo YouTube (soirées)'],
     ['webcamPageUrl', 'Page de la webcam (lien « plein écran »)'], ['planPistesImage', 'Image du plan des pistes (aperçu sur /pistes)'],
-    ['lat', 'Latitude (carte + météo de secours)'], ['lng', 'Longitude (carte + météo de secours)'],
+    ['lat', 'Foyer : latitude (carte + météo)'], ['lng', 'Foyer : longitude (carte + météo)'],
+    ['latRefuge', 'Refuge : latitude (carte + météo)'], ['lngRefuge', 'Refuge : longitude (carte + météo)'],
+    ['latCret', 'Crêt du Poulet : latitude (carte)'], ['lngCret', 'Crêt du Poulet : longitude (carte)'],
   ];
   const f = h('form', { class: 'card stack', onsubmit: guard(async (e) => {
     e.preventDefault();

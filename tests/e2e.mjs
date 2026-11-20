@@ -204,6 +204,10 @@ async function loginAs(who, viewport = { width: 390, height: 844 }) {
   await page.goto(`${base}/acces`, { waitUntil: 'networkidle' });
   const src = await page.locator('.map iframe').getAttribute('src');
   assert.match(src, /openstreetmap\.org\/export\/embed\.html\?bbox=.*marker=45\.33/);
+  await page.click('.map__tabs button:has-text("Refuge")');
+  assert.match(await page.locator('.map iframe').getAttribute('src'), /marker=45\.326060%2C6\.046790/);
+  await page.click('.map__tabs button:has-text("Crêt du Poulet")');
+  assert.match(await page.locator('.map iframe').getAttribute('src'), /marker=45\.328480%2C6\.060130/);
   await page.screenshot({ path: path.join(shots, 'desktop-acces-carte.png'), fullPage: true });
   ok('accès : carte OpenStreetMap intégrée avec repère');
   await page.close();
